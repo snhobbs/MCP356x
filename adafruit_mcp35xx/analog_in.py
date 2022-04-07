@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 """
-:py:class:`~adafruit_mcp36xx.analog_in.AnalogIn`
+:py:class:`~adafruit_mcp35xx.analog_in.AnalogIn`
 ======================================================
 AnalogIn for single-ended and
 differential ADC readings.
@@ -18,7 +18,7 @@ differential ADC readings.
 
 """
 
-from .mcp36xx import MCP36xx
+from .mcp35xx import MCP35xx
 
 
 class AnalogIn:
@@ -31,8 +31,8 @@ class AnalogIn:
     _fixed_point_position = 6
 
     def __init__(self, mcp, positive_pin, negative_pin=None):
-        if not isinstance(mcp, MCP36xx):
-            raise ValueError("mcp object is not a sibling of MCP36xx class.")
+        if not isinstance(mcp, MCP35xx):
+            raise ValueError("mcp object is not a sibling of MCP35xx class.")
         self._mcp = mcp
         self._pin_setting = positive_pin
         self.is_differential = negative_pin is not None

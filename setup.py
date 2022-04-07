@@ -23,14 +23,14 @@ with open(path.join(here, "README.rst"), encoding="utf-8") as f:
     long_description = f.read()
 
 setup(
-    name="adafruit-circuitpython-mcp36xx",
+    name="adafruit-circuitpython-mcp35xx",
     use_scm_version=True,
     setup_requires=["setuptools_scm"],
-    description="CircuitPython library for the MCP36xx Analog-to-Digital converters.",
+    description="CircuitPython library for the MCP35xx Analog-to-Digital converters.",
     long_description=long_description,
     long_description_content_type="text/x-rst",
     # The project's main homepage.
-    url="https://github.com/adafruit/Adafruit_CircuitPython_MCP36xx",
+    url="https://github.com/adafruit/Adafruit_CircuitPython_MCP35xx",
     # Author details
     author="Adafruit Industries",
     author_email="circuitpython@adafruit.com",
@@ -47,8 +47,8 @@ setup(
         "Programming Language :: Python :: 3",
     ],
     # What does your project relate to?
-    keywords="adafruit mcp36xx hardware micropython circuitpython",
+    keywords="adafruit mcp35xx hardware micropython circuitpython",
     # You can just specify the packages manually here if your project is
     # simple. Or you can use find_packages().
-    packages=["adafruit_mcp36xx"],
+    packages=["adafruit_mcp35xx"],
 )

@@ -3,31 +3,31 @@
 # SPDX-License-Identifier: MIT
 
 """
-:py:class:`~adafruit_mcp36xx.mcp3004.MCP3004`
+:py:class:`~adafruit_mcp35xx.mcp3004.MCP3562`
 ================================================
-MCP3004 4-channel, 10-bit, analog-to-digital
+MCP3562 4-channel, 10-bit, analog-to-digital
 converter instance.
 
 * Author(s): Brent Rubell
 
 For proper wiring, please refer to `Package Types diagram
-<https://cdn-shop.adafruit.com/datasheets/MCP3008.pdf#page=1>`_ and `Pin Description section
-<https://cdn-shop.adafruit.com/datasheets/MCP3008.pdf#G1.1035093>`_ of the MCP3004/MCP3008
+<https://cdn-shop.adafruit.com/datasheets/MCP3568.pdf#page=1>`_ and `Pin Description section
+<https://cdn-shop.adafruit.com/datasheets/MCP3568.pdf#G1.1035093>`_ of the MCP3562/MCP3568
 datasheet.
 """
 
-from .mcp36xx import MCP36xx
+from .mcp35xx import MCP35xx
 
-# MCP3004 Pin Mapping
+# MCP3562 Pin Mapping
 P0 = 0
 P1 = 1
 P2 = 2
 P3 = 3
 
 
-class MCP3004(MCP36xx):
+class MCP3562(MCP35xx):
     """
-    MCP3004 Differential channel mapping. The following list of available differential readings
+    MCP3562 Differential channel mapping. The following list of available differential readings
     takes the form ``(positive_pin, negative_pin) = (channel A) - (channel B)``.
 
     - (P0, P1) = CH0 - CH1
