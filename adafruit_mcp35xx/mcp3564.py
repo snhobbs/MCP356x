@@ -3,22 +3,22 @@
 # SPDX-License-Identifier: MIT
 
 """
-:py:class:`~adafruit_mcp3xxx.mcp3008.MCP3008`
+:py:class:`~adafruit_mcp35xx.mcp3008.MCP3564`
 =============================================================
-MCP3008 8-channel, 10-bit, analog-to-digital
+MCP3564 8-channel, 10-bit, analog-to-digital
 converter instance.
 
 * Author(s): Brent Rubell
 
 For proper wiring, please refer to the `Package Types diagram
-<https://cdn-shop.adafruit.com/datasheets/MCP3008.pdf#page=1>`_ and `Pin Description section
-<https://cdn-shop.adafruit.com/datasheets/MCP3008.pdf#G1.1035093>`_ of the MCP3004/MCP3008
+<https://cdn-shop.adafruit.com/datasheets/MCP3564.pdf#page=1>`_ and `Pin Description section
+<https://cdn-shop.adafruit.com/datasheets/MCP3564.pdf#G1.1035093>`_ of the MCP3004/MCP3564
 datasheet.
 """
 
-from .mcp3xxx import MCP3xxx
+from .mcp35xx import MCP35xx
 
-# MCP3008 Pin Mapping
+# MCP3564 Pin Mapping
 P0 = 0
 P1 = 1
 P2 = 2
@@ -29,9 +29,9 @@ P6 = 6
 P7 = 7
 
 
-class MCP3008(MCP3xxx):
+class MCP3564(MCP35xx):
     """
-    MCP3008 Differential channel mapping. The following list of available differential readings
+    MCP3564 Differential channel mapping. The following list of available differential readings
     takes the form ``(positive_pin, negative_pin) = (channel A) - (channel B)``.
 
     - (P0, P1) = CH0 - CH1

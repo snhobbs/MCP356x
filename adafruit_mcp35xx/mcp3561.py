@@ -4,28 +4,28 @@
 # SPDX-License-Identifier: MIT
 
 """
-:py:class:`~adafruit_mcp36xx.MCP3002.MCP3002`
+:py:class:`~adafruit_mcp35xx.MCP3561.MCP3561`
 ================================================
-MCP3002 2-channel, 10-bit, analog-to-digital
+MCP3561 2-channel, 10-bit, analog-to-digital
 converter instance.
 
 * Author(s): Brent Rubell, Brendan Doherty
 
 For proper wiring, please refer to `Package Type diagram
 <http://ww1.microchip.com/downloads/en/devicedoc/21294e.pdf#G1.1011678>`_ and `Pin Description
-<http://ww1.microchip.com/downloads/en/devicedoc/21294e.pdf#G1.1034774>`_ section of the MCP3002
+<http://ww1.microchip.com/downloads/en/devicedoc/21294e.pdf#G1.1034774>`_ section of the MCP3561
 datasheet.
 """
-from .mcp36xx import MCP36xx, buffer_to_nbit_int
+from .mcp35xx import MCP35xx, buffer_to_nbit_int
 
-# MCP3002 Pin Mapping
+# MCP3561 Pin Mapping
 P0 = 0
 P1 = 1
 
 
-class MCP3561(MCP36xx):
+class MCP3561(MCP35xx):
     """
-    MCP3002 Differential channel mapping. The following list of available differential readings
+    MCP3561 Differential channel mapping. The following list of available differential readings
     takes the form ``(positive_pin, negative_pin) = (channel A) - (channel B)``.
 
     - (P0, P1) = CH0 - CH1
@@ -37,8 +37,12 @@ class MCP3561(MCP36xx):
     DIFF_PINS = {(0, 1): P0, (1, 0): P1}
 
     def read(self, pin, is_differential=False):
-        self._out_buf[0] = 0x40 | ((not is_differential) << 5) | (pin << 4)
+        #self._out_buf[0] = 0x40 | ((not is_differential) << 5) | (pin << 4)
+        for i in range(len(self._out_buf)):
+            self._out_buf[i] = 0
+        self._out_buf[0] = 0x1
+
         with self._spi_device as spi:
             # pylint: disable=no-member
-            spi.write_readinto(self._out_buf, self._in_buf, out_end=2, in_end=2)
+            spi.write_readinto(self._out_buf, self._in_buf, out_end=4, in_end=4)
         return buffer_to_nbit_int(buffer=self._in_buf, byteorder="big", signed=True)
