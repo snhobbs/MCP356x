@@ -633,7 +633,7 @@ class ConfigurationTable:
         self._settings["cs_sel"]=BurnoutCurrentSourceSetting.k0
         self._settings["adc_mode"]=AdcOperatingMode.kStandby
 
-        self._settings["clk_prescale"]=0x3  # 8
+        self._settings["clk_prescale"]=0# 1 0x3  # 8
         self._settings["osr"]=0b1010
 
         self._settings["boost"]=BoostSetting.k1

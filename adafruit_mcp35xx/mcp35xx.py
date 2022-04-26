@@ -171,6 +171,12 @@ class MCP35xx:
         status, _ = self.read_register(objects.InternalRegisterAddress.kConfig0)
         return status
 
+    @property
+    def operating_status(self) -> objects.AdcOperatingMode:
+        _, data = self.read_register(objects.InternalRegisterAddress.kConfig0)
+        config0 = objects.unpack_config0(data)
+        return config0[-1]
+
     def read_all_registers(self) -> dict:
         '''Cycle through all registers and return dict of values.'''
         register_readings = dict()

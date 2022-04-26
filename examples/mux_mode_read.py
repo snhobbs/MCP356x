@@ -26,6 +26,10 @@ def init(mcp):
     config = objects.ConfigurationTable()
     config["data_format"] = data_format
     config["vref_sel"] = objects.VRefSelection.kInternal
+    config["boost"]=objects.BoostSetting.k2
+    config["adc_mode"]=objects.AdcOperatingMode.kConversion
+    config["osr"]=0b100
+    config["clk_prescale"]=0x1
 
     mcp.setup(config)
     mcp.send_command(objects.CommandOperationType.kFullReset)
@@ -65,7 +69,6 @@ def generate_table(mcp: MCP35xx) -> Table:
         objects.MuxChannel.kTempn ,
         objects.MuxChannel.kVcm ,
     ]
-    init(mcp)
     for channel in channels:
         status = mcp.set_mux_channel(channel, objects.MuxChannel.kAGnd)
 
@@ -119,9 +122,10 @@ def main():
     register_readings = mcp.read_all_registers()
     console.print(tui.generate_settings_table(register_readings))
 
-    with Live(generate_table(mcp), refresh_per_second=1) as live:
+    rate = 0.25
+    with Live(generate_table(mcp), refresh_per_second=rate) as live:
         while True:
-            sleep(2)
+            sleep(0.5/rate)
             print("update")
             live.update(generate_table(mcp))
 
