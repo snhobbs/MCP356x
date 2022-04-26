@@ -1,2 +1,2 @@
 from . import objects
-from . mcp35xx import *
+from . mcp35xx import MCP35xx
