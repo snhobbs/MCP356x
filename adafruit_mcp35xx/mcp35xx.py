@@ -40,174 +40,136 @@ Implementation Notes
 __version__ = "0.0.0-auto.0"
 __repo__ = "https://github.com/adafruit/Adafruit_CircuitPython_MCP36xx.git"
 
-import math
+from typing import Union, Optional, Tuple
 from adafruit_bus_device.spi_device import SPIDevice
-from enum import IntEnum
+from . import objects
+
+def write_register(spi, data: Union[bytes, bytearray, int],
+                   register: objects.InternalRegisterAddress,
+                   address: int) -> int:
+    cmd = bytearray(5)
+    datain = bytearray(5)
+    cmd[0] = objects.make_command_byte(
+        address=address,
+        body=register,
+        command=objects.CommandType.kIncrimentalWrite)
+
+    if isinstance(data, int):
+        data = bytes([data])
+
+    for i, pt in enumerate(data):
+        cmd[i+1] = pt
+
+    size = len(data)
+    spi.write_readinto(buffer_out=cmd, buffer_in=datain, out_end=size, in_end=size)
+    return datain[0]
 
 
-'''
-Takes a bytearray from an adc channel reading
-and return a signed int properly masked
-'''
-def buffer_to_nbit_int(buffer : bytearray, byteorder: str, signed: bool):
-    return int.from_bytes(buffer, byteorder=byteorder, signed=signed)
+def read_register(spi, register: Union[objects.InternalRegister, objects.InternalRegisterAddress],
+                  address: int) -> Tuple[int, bytearray]:
+    if isinstance(register, objects.InternalRegisterAddress):
+        register = objects.internal_registers[register]
+    nbytes = register.nbytes + 1
+    cmd = bytearray(nbytes)
+    datain = bytearray(nbytes)
+    cmd[0] = objects.make_command_byte(
+        address=address,
+        body=register.address,
+        # command=objects.CommandType.kStaticRead)
+        command=objects.CommandType.kIncrimentalRead)
+    spi.write_readinto(buffer_out=cmd, buffer_in=datain)
+    status = datain[0]
+    return status, datain[1:]
 
 
+def send_command(spi, command: objects.CommandOperationType,
+                   address: int) -> int:
+    cmd = bytearray(2)
+    datain = bytearray(2)
+    cmd[0] = objects.make_command_byte(
+        address=address,
+        body=command,
+        command=objects.CommandType.kCommand)
 
-class InternalRegister:
-    def __init__(self, address: int, name: str, nbits: int, rw: str):
-        self.address = address
-        self.name = name
-        self.nbits = nbits
-        self.rw = rw
+    size = len(cmd)
+    spi.write_readinto(buffer_out=cmd, buffer_in=datain, out_end=size, in_end=size)
+    return datain[0]
 
-class Register(IntEnum):
-    ADCDATA   = 0x00 #   // (it's complicated)  R
-    CONFIG0   = 0x01 #   // 8-bit               RW
-    CONFIG1   = 0x02 #   // 8-bit               RW
-    CONFIG2   = 0x03 #   // 8-bit               RW
-    CONFIG3   = 0x04 #   // 8-bit               RW
-    IRQ       = 0x05 #   // 8-bit               RW
-    MUX       = 0x06 #   // 8-bit               RW
-    SCAN      = 0x07 #   // 24-bit              RW
-    TIMER     = 0x08 #   // 24-bit              RW
-    OFFSETCAL = 0x09 #   // 24-bit              RW
-    GAINCAL   = 0x0A #   // 24-bit              RW
-    RESERVED0 = 0x0B #   // 24-bit              RW
-    RESERVED1 = 0x0C #   // 8-bit               RW
-    LOCK      = 0x0D #   // 8-bit               RW
-    RESERVED2 = 0x0E #  // 16-bit              RW
-    CRCCFG    = 0x0F #   // 16-bit              R
-
-class CommandType(IntEnum):
-    kDefault = 0x00
-    kStaticReadRegister = 0b01
-    kIncrimentalWriteRegister = 0b10
-    kIncrimentalReadRegister = 0b11
-
-class Channel(IntEnum):
-    SE_0   = 0x00
-    SE_1   = 0x01
-    SE_2   = 0x02
-    SE_3   = 0x03
-    SE_4   = 0x04
-    SE_5   = 0x05
-    SE_6   = 0x06
-    SE_7   = 0x07
-    DIFF_A = 0x08
-    DIFF_B = 0x09
-    DIFF_C = 0x0A
-    DIFF_D = 0x0B
-    TEMP   = 0x0C  # Internal temperature sensor.
-    AVDD   = 0x0D
-    VCM    = 0x0E
-    OFFSET = 0x0F
-
-class Mode(IntEnum):
-    GAIN_ONETHIRD = 0
-    GAIN_1        = 1
-    GAIN_2        = 2
-    GAIN_4        = 3
-    GAIN_8        = 4
-    GAIN_16       = 5
-    GAIN_32       = 6
-    GAIN_64       = 7
-
-class BiasCurrent(IntEnum):
-    NONE           = 0
-    NANOAMPS_900   = 1
-    NANOAMPS_3700  = 2
-    NANOAMPS_15000 = 3
-
-class BiasBoost(IntEnum):
-    HALF      = 0
-    TWOTHIRDS = 1
-    ONE       = 2
-    DOUBLE    = 3
-
-class OversamplingRatio(IntEnum):
-    OSR_32    = 0x00,
-    OSR_64    = 0x01
-    OSR_128   = 0x02
-    OSR_256   = 0x03  # Default on reset.
-    OSR_512   = 0x04
-    OSR_1024  = 0x05
-    OSR_2048  = 0x06
-    OSR_4096  = 0x07
-    OSR_8192  = 0x08
-    OSR_16384 = 0x09
-    OSR_20480 = 0x0A
-    OSR_24576 = 0x0B
-    OSR_40960 = 0x0C
-    OSR_49152 = 0x0D
-    OSR_81920 = 0x0E
-    OSR_98304 = 0x0F
-
-class AMCLKPrescale(IntEnum):
-    OVER_1 = 0
-    OVER_2 = 1
-    OVER_4 = 2
-    OVER_8 = 3
 
 class MCP35xx:
     _nbits = 24
     _internal_vref = 2.4
-    _transfer_bytes = int(math.log(_nbits, 2))
-    _registers = (\
-        InternalRegister(0, "ADCDATA", 32, "r"),
-        InternalRegister(1, "CONFIG0", 8, "rw"),
-        InternalRegister(2, "CONFIG1", 8, "rw"),
-        InternalRegister(3, "CONFIG2", 8, "rw"),
-        InternalRegister(4, "CONFIG3", 8, "rw"),
-        InternalRegister(5, "IRQ", 8, "rw"),
-        InternalRegister(6, "MUX", 8, "rw"),
-        InternalRegister(7, "SCAN", 24, "rw"),
-        InternalRegister(8, "TIMER", 24, "rw"),
-        InternalRegister(9, "OFFSETCAL", 24, "rw"),
-        InternalRegister(0xa, "GAINCAL", 24, "rw"),
-        InternalRegister(0xb, "RESERVED", 24, "rw"),
-        InternalRegister(0xc, "RESERVED", 8, "rw"),
-        InternalRegister(0xd, "LOCK", 8, "rw"),
-        InternalRegister(0xe, "RESERVED", 16, "rw"),
-        InternalRegister(0xf, "CRCCFG", 16, "r"))
 
-    def __init__(self, spi_bus, cs, ref_voltage=None):
+    def __init__(self, spi_bus, cs, ref_voltage=None, address=0x01):
+        self._baudrate = int(1e6)
         if ref_voltage is None:
             ref_voltage = self._internal_vref
-        self._spi_device = SPIDevice(spi_bus, cs, baudrate=int(1e6))
-        self._out_buf = bytearray(self._transfer_bytes)
-        self._in_buf = bytearray(self._transfer_bytes)
+        self._spi_device = SPIDevice(spi_bus, cs, baudrate=self._baudrate)
+        self._address = address
         self._ref_voltage = ref_voltage
+        self._register_settings = None
 
     @property
-    def bits(self):
+    def register_settings(self) -> dict:
+        return self._register_settings
+
+    def setup(self, config: Optional[Union[dict, objects.ConfigurationTable]]) -> None:
+        if isinstance(config, objects.ConfigurationTable):
+            self._register_settings = config.register_settings
+        elif config is None:
+            self._register_settings = objects.ConfigurationTable().register_settings
+        else:
+            self._register_settings = config
+
+        for key, value in self.register_settings.items():
+            self.write_register(register=key, data=value)
+
+    @property
+    def bits(self) -> int:
         return self._nbits
 
     @property
-    def reference_voltage(self):
+    def reference_voltage(self) -> float:
         """Returns the MCP36xx's reference voltage. (read-only)"""
         return self._ref_voltage
 
-    def write_default_registers(self):
+    def read_register(self, register: Union[objects.InternalRegister, objects.InternalRegisterAddress]) -> Tuple[int, bytearray]:
         with self._spi_device as spi:
-            spi.write(self._out_buf, start=0, end=1)
+            status, data = read_register(spi, register, address=self._address)
+        return status, data
 
-    def read(self, pin, is_differential=False):
-        """SPI Interface for MCP36xx-based ADCs reads. Due to 10-bit accuracy, the returned
-        value ranges [0, 1023].
-
-        :param int pin: individual or differential pin.
-        :param bool is_differential: single-ended or differential read.
-
-        .. note:: This library offers a helper class called `AnalogIn`_ for both single-ended
-            and differential reads. If you opt to not implement `AnalogIn`_ during differential
-            reads, then the ``pin`` parameter should be the first of the two pins associated with
-            the desired differential channel mapping.
-        """
-        assert(0)
-        self._out_buf[1] = ((not is_differential) << 7) | (pin << 4)
+    def write_register(self, data: Union[bytes, bytearray, int],
+                   register: objects.InternalRegisterAddress) -> int:
         with self._spi_device as spi:
-            # pylint: disable=no-member
-            spi.write_readinto(self._out_buf, self._in_buf)
+            status = write_register(spi, data, register, address=self._address)
+        return status
 
-        return buffer_to_nbit_int(buffer=self._in_buf, byteorder="big", signed=True)
+    def send_command(self, command: objects.CommandOperationType) -> int:
+        with self._spi_device as spi:
+            status = send_command(spi, command, self._address)
+        return status
+
+    def set_mux_channel(self, mux_positive: objects.MuxChannel, mux_negative: objects.MuxChannel) -> int:
+        setting = objects.pack_mux(
+            vinp=mux_positive,
+            vinn=mux_negative)
+
+        status = self.write_register(setting, objects.InternalRegisterAddress.kMux)
+        return status
+
+    def read_adc_data(self, nbytes=4) -> Tuple[int, bytearray]:
+        assert nbytes==4
+        status, data = self.read_register(objects.InternalRegisterAddress.kAdcData)
+        return status, data
+
+    def read_status(self) -> int:
+        status, _ = self.read_register(objects.InternalRegisterAddress.kConfig0)
+        return status
+
+    def read_all_registers(self) -> dict:
+        '''Cycle through all registers and return dict of values.'''
+        register_readings = dict()
+        for register in objects.internal_registers.values():
+            _, data = self.read_register(register)
+            register_readings[register.address] = data
+        return register_readings

@@ -6,8 +6,16 @@ Interacting can then be done like a model + view + controller.
 '''
 
 import enum
-from typing import Union, List
+from typing import Union, List, Literal, Tuple
 from functools import partial
+
+
+'''
+Takes a bytearray from an adc channel reading
+and return a signed int properly masked
+'''
+def buffer_to_nbit_int(buffer : bytearray, byteorder: Literal['little', 'big'], signed: bool):
+    return int.from_bytes(buffer, byteorder=byteorder, signed=signed)
 
 
 class InputMuxSetting(enum.IntEnum):
@@ -145,6 +153,7 @@ def get_osr1(osr: int) -> int:
     }
     return lookup_table[osr]
 
+
 def calc_lsb_for_dc_input(vinp: float, vinn: float, vrefp: float, vrefn : float = 0, gain: float = 1) -> int:
     '''
     EQ 5-5
@@ -158,24 +167,55 @@ class DataFormat(enum.IntEnum):
     figure 5-8
     page 48.'''
     kDataSign = 0
-    kLeftZeroPaddedDataSign = 1
+    kRightPaddedZero = 1
     kSignExtended = 2
     kChannelPlusSignExtended = 3
 
-def format_adc_output(mode: DataFormat, data: int, channel: int = 0) -> int:
+
+def read_adc_output(mode: DataFormat, data: Union[bytes, bytearray]) -> Tuple[int, int]:
+    channel = -1
+    value = 0
+    data = bytearray(data)
+    if mode == DataFormat.kDataSign:
+        assert len(data) == 3
+        data.append(0)
+
+    if mode in [DataFormat.kRightPaddedZero, DataFormat.kDataSign]:
+        assert len(data) == 4
+        sign = data[-1]&(1<<7)
+        abs_value = (data[2]&0x7f)<<8 | data[1]<<8 | data[0]
+        mult = 1
+        if sign:
+            mult = -1
+        value = abs_value * mult
+    elif mode == DataFormat.kSignExtended:
+        assert len(data) == 4
+        value = int.from_bytes(data, byteorder="big", signed=True)
+    elif mode == DataFormat.kChannelPlusSignExtended:
+        assert len(data) == 4
+        channel = (data[-1] >> 4) & 0x0f
+        data[-1] |= 0xf0
+        value = int.from_bytes(data, byteorder="big", signed=True)
+    else:
+        assert 0
+    return channel, value
+
+def format_adc_output(mode: DataFormat, data: int, channel: int = 0) -> bytes:
     sign = int(data < 0)
     out = None
     if mode == DataFormat.kDataSign:
         dout = abs(data) | (sign<<23)
         out = dout.to_bytes(length=3, byteorder="little")
-    elif mode == DataFormat.kLeftZeroPaddedDataSign:
+    elif mode == DataFormat.kRightPaddedZero:
         dout = (abs(data) | (sign<<23)) << 8
         out = dout.to_bytes(length=4, byteorder="little")
     elif mode == DataFormat.kSignExtended:
         out = (data<<8).to_bytes(length=4, byteorder="little")
     elif mode == DataFormat.kChannelPlusSignExtended:
-        raise NotImplementedError
-    return out
+        out = bytearray(dout.to_bytes(length=4, byteorder="little"))
+        out[-1] &= 0x0f
+        out[-1] |= (channel & 0xf)<<4
+    return bytes(out)
 
 
 class VRefSelection(enum.IntEnum):
@@ -314,6 +354,7 @@ class CommandOperationType(enum.IntEnum):
     kFastShutdown = 0b1100
     kFullShutdown = 0b1101
     kFastReset = 0b1101
+    kFullReset = 0b1110
 
 
 def read_status_byte(value: int) -> tuple:
@@ -357,6 +398,33 @@ page 89.'''
     kCrccfg = 15
 
 
+class InternalRegister:
+    def __init__(self, address: InternalRegisterAddress, nbytes: int):
+        self.address = address
+        self.nbytes = nbytes
+
+    @property
+    def name(self):
+        return self.address.name
+
+
+internal_registers = {
+    InternalRegisterAddress.kAdcData: InternalRegister(InternalRegisterAddress.kAdcData, 4), # FIXME this can change
+    InternalRegisterAddress.kConfig0: InternalRegister(InternalRegisterAddress.kConfig0, 1),
+    InternalRegisterAddress.kConfig1: InternalRegister(InternalRegisterAddress.kConfig1, 1),
+    InternalRegisterAddress.kConfig2: InternalRegister(InternalRegisterAddress.kConfig2, 1),
+    InternalRegisterAddress.kConfig3: InternalRegister(InternalRegisterAddress.kConfig3, 1),
+    InternalRegisterAddress.kIrq: InternalRegister(InternalRegisterAddress.kIrq, 1),
+    InternalRegisterAddress.kMux: InternalRegister(InternalRegisterAddress.kMux, 1),
+    InternalRegisterAddress.kScan: InternalRegister(InternalRegisterAddress.kScan, 3),
+    InternalRegisterAddress.kTimer: InternalRegister(InternalRegisterAddress.kTimer, 3),
+    InternalRegisterAddress.kOffsetcal: InternalRegister(InternalRegisterAddress.kOffsetcal, 3),
+    InternalRegisterAddress.kGaincal: InternalRegister(InternalRegisterAddress.kGaincal, 3),
+    InternalRegisterAddress.kLock: InternalRegister(InternalRegisterAddress.kLock, 1),
+    InternalRegisterAddress.kCrccfg: InternalRegister(InternalRegisterAddress.kCrccfg, 2),
+}
+
+
 def make_command_byte(address: int, body: Union[CommandOperationType, InternalRegisterAddress], command: CommandType) -> int:
     '''Command byte
     table 6-1
@@ -365,33 +433,44 @@ def make_command_byte(address: int, body: Union[CommandOperationType, InternalRe
     assert value <= 0xff
     return value
 
-
+CONFIG0_PARTIAL_SHUTDOWN_POSITION = 7
+CONFIG0_VREF_SEL_POSITION = 6
+CONFIG0_CLK_SEL_POSITION = 4
+CONFIG0_CS_SEL_POSITION = 2
+CONFIG0_ADC_MODE_POSITION = 0
 def pack_config0(partial_shutdown: bool, vref_sel: VRefSelection, clk_sel: ClockSelection, cs_sel: BurnoutCurrentSourceSetting, adc_mode: AdcOperatingMode) -> int:
-    return int(partial_shutdown) << 7 |\
-        int(vref_sel) << 6 | int(clk_sel) << 4 |\
-        int(cs_sel) << 2 | int(adc_mode)
+    return int(partial_shutdown) << CONFIG0_PARTIAL_SHUTDOWN_POSITION |\
+        int(vref_sel) << CONFIG0_VREF_SEL_POSITION | int(clk_sel) <<  CONFIG0_CLK_SEL_POSITION|\
+        int(cs_sel) << CONFIG0_CS_SEL_POSITION | int(adc_mode) << CONFIG0_ADC_MODE_POSITION
 
 
-def unpack_config0(value) -> tuple:
-    partial_shutdown = bool(value & 0x7)
-    vref_sel = VRefSelection((value >> 6) & 0x1)
-    clk_sel = ClockSelection((value >> 4) & 0x3)
-    cs_sel = BurnoutCurrentSourceSetting((value >> 2) & 0x3)
-    adc_mode = AdcOperatingMode(value & 0x3)
+def unpack_config0(value: Union[bytes, bytearray, int]) -> tuple:
+    if not isinstance(value, int):
+        value = value[0]
+
+    partial_shutdown = ((value >> CONFIG0_PARTIAL_SHUTDOWN_POSITION) & 0x1) == 1
+    vref_sel = VRefSelection((value >> CONFIG0_VREF_SEL_POSITION) & 0x1)
+    clk_sel = ClockSelection((value >> CONFIG0_CLK_SEL_POSITION) & 0x3)
+    cs_sel = BurnoutCurrentSourceSetting((value >> CONFIG0_CS_SEL_POSITION) & 0x3)
+    adc_mode = AdcOperatingMode((value >> CONFIG0_ADC_MODE_POSITION) & 0x3)
     return partial_shutdown, vref_sel, clk_sel, cs_sel, adc_mode
 
 
+CONFIG1_CLK_PRESCALE_POSITION = 6
+CONFIG1_OSR_POSITION = 2
 def pack_config1(clk_prescale: int, osr: int) -> int:
-    assert clk_prescale < 0x3
+    assert clk_prescale <= 0x3
     assert clk_prescale >= 0
     assert osr < 0xf
     assert osr >= 0
-    return (clk_prescale << 6) | (osr << 2)
+    return (clk_prescale << CONFIG1_CLK_PRESCALE_POSITION) | (osr << CONFIG1_OSR_POSITION)
 
 
-def unpack_config1(value) -> tuple:
-    clk_prescale = (value >> 6)&0x3
-    osr = (value >> 2) & 0xf
+def unpack_config1(value: Union[bytes, bytearray, int]) -> tuple:
+    if not isinstance(value, int):
+        value = value[0]
+    clk_prescale = (value >> CONFIG1_CLK_PRESCALE_POSITION)&0x3
+    osr = (value >> CONFIG1_OSR_POSITION) & 0xf
     return clk_prescale, osr
 
 
@@ -399,7 +478,9 @@ def pack_config2(boost: BoostSetting, gain: AdcGainSetting, az_mux: bool, az_ref
     return int(boost)<<6 | int(gain) << 3 | int(az_mux)<<2 | int(az_ref) << 1
 
 
-def unpack_config2(value) -> tuple:
+def unpack_config2(value: Union[bytes, bytearray, int]) -> tuple:
+    if not isinstance(value, int):
+        value = value[0]
     boost = BoostSetting((value>>6)&0x3)
     gain = AdcGainSetting((value>>3)&0b111)
     az_mux = (value >> 2)&0x1
@@ -411,7 +492,9 @@ def pack_config3(conv_mode: ConversionMode, data_format: DataFormat, crc_format:
     return int(conv_mode) << 6 | int(data_format) << 4 | int(crc_format) << 3 | int(enable_crc) << 2 | int(enable_offsetcal) << 1 | int(enable_gaincal)
 
 
-def unpack_config3(value) -> tuple:
+def unpack_config3(value: Union[bytes, bytearray, int]) -> tuple:
+    if not isinstance(value, int):
+        value = value[0]
     conv_mode = ConversionMode((value >> 6)&0x3)
     data_format = DataFormat((value >> 4)&0x3)
     crc_format = CRCFormat((value >> 3)&0x1)
@@ -427,7 +510,9 @@ def pack_irq(mdat_irq: bool, irq_inactive_state: bool, enable_fastcmd: bool, ena
         int(enable_conversion_start_interrupt)
 
 
-def unpack_irq(value) -> tuple:
+def unpack_irq(value: Union[bytes, bytearray, int]) -> tuple:
+    if not isinstance(value, int):
+        value = value[0]
     data_ready = (value >> 6)&0x1 == 1
     crccfg_status = (value >> 5)&0x1 == 1
     por_status = (value >> 4)&0x1 == 1
@@ -447,7 +532,9 @@ def pack_mux(vinp: MuxChannel, vinn: MuxChannel) -> int:
     return int(vinp) << 4 | int(vinn)
 
 
-def unpack_mux(value: int) -> tuple:
+def unpack_mux(value: Union[bytes, bytearray, int]) -> tuple:
+    if not isinstance(value, int):
+        value = value[0]
     vinp = MuxChannel(value >> 4)
     vinn = MuxChannel(value&0xf)
     return vinp, vinn
@@ -460,12 +547,17 @@ def unpack_mux(value: int) -> tuple:
 def pack_scan(delay: InnerScanDelay, channels: List[MuxChannel]) -> bytearray:
     channel_int = 0
     for channel in channels:
-        channel_int |= (1<<channel)
+        channel_int |= (1<<int(channel))
     return bytearray([int(delay)<<5, int(channel_int)>>8, int(channel_int)&0xff])
 
 
 def unpack_scan(datain: Union[bytes, bytearray]) -> tuple:
-    return datain[0] >> 5, (datain[1] << 8 | datain[2])
+    channels = []
+    channel_int = (datain[1] << 8 | datain[2])
+    for i in range(16):
+        if (channel_int >> i) & 0x1:
+            channels.append(MuxChannel(i))
+    return datain[0] >> 5, channels
 
 
 def pack_int(value: int, nbytes: int) -> bytearray:
@@ -497,3 +589,165 @@ unpack_lock = unpack_int
 unpack_chip_id = unpack_int  #  reserved register that identifies chip
 
 unpack_crccfg = unpack_int
+
+
+class ConfigurationTable:
+    '''
+    Holds all settings for the chip. This is passed to the setup function of the chip.
+    '''
+    def __init__(self):
+        self._settings = dict()
+
+        self._settings["partial_shutdown"]=False
+        self._settings["vref_sel"]=VRefSelection.kOutput
+        self._settings["clk_sel"]=ClockSelection.kInternal
+        self._settings["cs_sel"]=BurnoutCurrentSourceSetting.k0
+        self._settings["adc_mode"]=AdcOperatingMode.kStandby
+
+        self._settings["clk_prescale"]=0x3  # 8
+        self._settings["osr"]=0b0111  # 4096
+
+        self._settings["boost"]=BoostSetting.k1
+        self._settings["gain"]=AdcGainSetting.k1
+        self._settings["az_mux"]=False
+        self._settings["az_ref"]=False
+
+        self._settings["conv_mode"]=ConversionMode.kOneShotStandby
+        self._settings["data_format"]=DataFormat.kSignExtended
+        self._settings["crc_format"]=CRCFormat.k16
+        self._settings["enable_crc"]=False
+        self._settings["enable_offsetcal"]=False
+        self._settings["enable_gaincal"]=False
+
+        self._settings["mdat_irq"]=False  #  Regular data mode, changing this put the data into 4 bit MDAT mode!!
+        self._settings["irq_inactive_state"]=True
+        self._settings["enable_fastcmd"]=True
+        self._settings["enable_conversion_start_interrupt"]=True
+
+        self._settings["vinp"]=MuxChannel.kChannel0
+        self._settings["vinn"]=MuxChannel.kAGnd
+
+        self._settings["delay"]=InnerScanDelay.k0
+        self._settings["scan_channels"]=[]
+
+        self._settings["timer"]= 1024
+
+        self._settings["offsetcal"]= 0x0
+        self._settings["gaincal"]= 0x800000 # Gain of 1, this is the default
+
+        self._settings["lock"]= 0xA5  # leave unlocked
+
+    def __setitem__(self, key, value):
+        if key not in self._settings:
+            raise KeyError(f"Key {key} not found")
+        self._settings[key] = value
+
+    def __getitem__(self, key):
+        return self._settings[key]
+
+    @property
+    def register_settings(self):
+        '''
+        Returns the internal state as a dictionary of register settings.
+        '''
+
+        registers = dict()
+        registers[InternalRegisterAddress.kConfig0] = pack_config0(
+            partial_shutdown=self["partial_shutdown"],
+            vref_sel=self["vref_sel"],
+            clk_sel=self["clk_sel"],
+            cs_sel=self["cs_sel"],
+            adc_mode=self["adc_mode"])
+
+        registers[InternalRegisterAddress.kConfig1] = pack_config1(
+            clk_prescale=self["clk_prescale"],
+            osr=self["osr"])
+
+        registers[InternalRegisterAddress.kConfig2] = pack_config2(
+            boost=self["boost"],
+            gain=self["gain"],
+            az_mux=self["az_mux"],
+            az_ref=self["az_ref"])
+
+        registers[InternalRegisterAddress.kConfig3] = pack_config3(
+            conv_mode=self["conv_mode"],
+            data_format=self["data_format"],
+            crc_format=self["crc_format"],
+            enable_crc=self["enable_crc"],
+            enable_offsetcal=self["enable_offsetcal"],
+            enable_gaincal=self["enable_gaincal"])
+
+        registers[InternalRegisterAddress.kIrq] = pack_irq(
+            mdat_irq=self["mdat_irq"],
+            irq_inactive_state=self["irq_inactive_state"],
+            enable_fastcmd=self["enable_fastcmd"],
+            enable_conversion_start_interrupt=self["enable_conversion_start_interrupt"])
+
+        #  Start off with the channel0 single ended
+        registers[InternalRegisterAddress.kMux] = pack_mux(
+            vinp=self["vinp"],
+            vinn=self["vinn"])
+
+        # Scan mode set to 0 sets mux mode
+        registers[InternalRegisterAddress.kScan] = pack_scan(
+            delay=self["delay"],
+            channels=self["scan_channels"])
+
+        registers[InternalRegisterAddress.kTimer] = pack_timer(self["timer"])
+
+        registers[InternalRegisterAddress.kOffsetcal] = pack_offsetcal(self["offsetcal"])
+        registers[InternalRegisterAddress.kGaincal] = pack_gaincal(self["gaincal"]) # Gain of 1, this is the default
+
+        registers[InternalRegisterAddress.kLock] = pack_lock(self["lock"])  # leave unlocked
+        return registers
+
+
+def internal_registers_to_configuration_table(registers: dict) -> ConfigurationTable:
+    table = ConfigurationTable()
+
+    (table["partial_shutdown"],
+     table["vref_sel"],
+     table["clk_sel"],
+     table["cs_sel"],
+     table["adc_mode"]) = unpack_config0(registers[InternalRegisterAddress.kConfig0])
+
+    (table["clk_prescale"],
+     table["osr"]) = unpack_config1(registers[InternalRegisterAddress.kConfig1])
+
+    (table["boost"],
+     table["gain"],
+     table["az_mux"],
+     table["az_ref"]) = unpack_config2(registers[InternalRegisterAddress.kConfig2])
+
+    t = unpack_config3(registers[InternalRegisterAddress.kConfig3])
+
+    (table["conv_mode"],
+     table["data_format"],
+     table["crc_format"],
+     table["enable_crc"],
+     table["enable_offsetcal"],
+     table["enable_gaincal"]) = t
+
+    t = unpack_irq(registers[InternalRegisterAddress.kIrq])
+
+    (data_ready,crccfg_status, por_status,
+     table["mdat_irq"],
+     table["irq_inactive_state"],
+     table["enable_fastcmd"],
+     table["enable_conversion_start_interrupt"]) = t
+
+    t = unpack_mux(registers[InternalRegisterAddress.kMux])
+    (table["vinp"],
+     table["vinn"]) = t
+
+    t = unpack_scan(registers[InternalRegisterAddress.kScan])
+    table["delay"], table["scan_channels"] = t
+
+    table["timer"] = unpack_timer(registers[InternalRegisterAddress.kTimer])[0]
+
+    table["offsetcal"] = unpack_offsetcal(registers[InternalRegisterAddress.kOffsetcal])[0]
+    table["gaincal"] = unpack_gaincal(registers[InternalRegisterAddress.kGaincal])[0]
+
+    table["lock"] = unpack_lock(registers[InternalRegisterAddress.kLock])[0]
+    return table
+
