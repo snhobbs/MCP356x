@@ -14,6 +14,12 @@ def generate_settings_table(registers) -> Table:
 
     t = objects.internal_registers_to_configuration_table(registers)
 
+
+    for key, value in registers.items():
+        row = [key]
+        row.append(str([hex(pt) for pt in value]))
+        table.add_row(*np.array(row, dtype=str))
+
     for key, value in t._settings.items():
         row = [key]
         row.append(str(value))

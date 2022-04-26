@@ -1,10 +1,5 @@
 '''
-Basic setup sequence to read one channel
-Simplest setup is used.
-No scan mode, single channel
-All auto zero is disabled
-No crc
-No calibration
+Read all the internal registers of the chip, print, and exit.
 '''
 from time import sleep
 from typing import Union
@@ -34,19 +29,10 @@ def main():
     cs = digitalio.DigitalInOut(board.D21)
     cs.switch_to_output()
 
-    config = objects.ConfigurationTable()
-
     mcp = MCP35xx(spi_bus=spi_bus, cs=cs, address=0x1)
-    mcp.send_command(objects.CommandOperationType.kFullReset)
-    mcp.setup(config)
-    print("Setup Complete")
 
     console = Console()
     console.print(generate_table(mcp))
-
-    t = objects.internal_registers_to_configuration_table(config.register_settings)
-    for key, value in t._settings.items():
-        assert value == config[key]
 
 if __name__ == "__main__":
     main()

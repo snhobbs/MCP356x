@@ -1,5 +1,5 @@
 import unittest
-from adafruit_mcp36xx import objects
+from adafruit_mcp35xx import objects
 
 class TestBasic(unittest.TestCase):
     def setUp(self):
@@ -137,8 +137,8 @@ class TestBasic(unittest.TestCase):
 
 
     def test_pack_unpack_mux(self):
-        vinp = objects.MuxChannel.kSingleChannel0
-        vinn = objects.MuxChannel.kSingleChannel1
+        vinp = objects.MuxChannel.kChannel0
+        vinn = objects.MuxChannel.kChannel1
 
         t = (
             vinp,
@@ -154,11 +154,11 @@ class TestBasic(unittest.TestCase):
 
     def test_pack_unpack_scan(self):
         delay = objects.InnerScanDelay.k0
-        channel = objects.MuxChannel.kSingleChannel1
+        channels = [objects.ScanChannel.kSingleChannel0]
 
         t = (
             delay,
-            channel
+            channels
         )
 
         data = objects.pack_scan(*t)
@@ -179,7 +179,7 @@ class TestBasic(unittest.TestCase):
         data = objects.pack_int(*t, nbytes=1)
         self.assertEqual(data[0], value)
 
-        unpack = objects.unpack_int(data, nbytes=1)
+        unpack = objects.unpack_int(data)
         self.assertEqual(unpack, t)
 
     def test_pack_unpack_int(self):
@@ -194,8 +194,50 @@ class TestBasic(unittest.TestCase):
         self.assertEqual(data[1], 0)
         self.assertEqual(data[2], value)
 
-        unpack = objects.unpack_int(data, nbytes=3)
+        unpack = objects.unpack_int(data)
         self.assertEqual(unpack, t)
+
+    def test_read_adc_output_signextend(self):
+        mode = objects.DataFormat.kSignExtended
+        lsb = 0x7fffff
+        data = objects.format_adc_output(mode=mode, data=lsb, channel=1)
+        self.assertEqual(data[0], 0x00)  # unsigned
+        self.assertEqual(data[1], 0x7f)
+        self.assertEqual(data[2], 0xff)
+        self.assertEqual(data[3], 0xff)
+        _, reading = objects.read_adc_output(mode=mode, data=data)
+        self.assertEqual(reading, lsb)
+
+        lsb = -1
+        data = objects.format_adc_output(mode=mode, data=lsb, channel=1)
+        self.assertEqual(data[0], 0xff)  # signed
+        self.assertEqual(data[1], 0xff)
+        self.assertEqual(data[2], 0xff)
+        self.assertEqual(data[3], 0xff)
+        _, reading = objects.read_adc_output(mode=mode, data=data)
+        self.assertEqual(reading, lsb)
+
+
+    def test_read_adc_output_channelplussignextend(self):
+        mode = objects.DataFormat.kChannelPlusSignExtended
+        lsb = 0x7fffff
+        data = objects.format_adc_output(mode=mode, data=lsb, channel=1)
+        self.assertEqual(data[0], 0x10)
+        self.assertEqual(data[1], 0x7f)
+        self.assertEqual(data[2], 0xff)
+        self.assertEqual(data[3], 0xff)
+        channel, reading = objects.read_adc_output(mode=mode, data=data)
+        self.assertEqual(channel, 1)
+        self.assertEqual(reading, lsb)
+
+        lsb = -1
+        data = objects.format_adc_output(mode=mode, data=lsb, channel=1)
+        self.assertEqual(data[0], 0x1f)  # signed
+        self.assertEqual(data[1], 0xff)
+        self.assertEqual(data[2], 0xff)
+        self.assertEqual(data[3], 0xff)
+        _, reading = objects.read_adc_output(mode=mode, data=data)
+        self.assertEqual(reading, lsb)
 
 
 if __name__ == '__main__':

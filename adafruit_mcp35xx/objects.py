@@ -8,6 +8,7 @@ Interacting can then be done like a model + view + controller.
 import enum
 from typing import Union, List, Literal, Tuple
 from functools import partial
+import numpy as np
 
 
 '''
@@ -61,6 +62,13 @@ def first_order_temperature_sensor_transfer_to_vin(temp: float) -> float:
     page 40.
     gain=1, mclk=4.9152MHz.'''
     return (temp*0.2973+80)/1000
+
+
+def first_order_temperature_sensor_transfer_v_to_c(vin: float, vref: float) -> float:
+    '''Eq. 5-1
+    page 40.
+    gain=1, mclk=4.9152MHz.'''
+    return (vin*1000-80)/0.2973
 
 
 '''
@@ -176,28 +184,46 @@ def read_adc_output(mode: DataFormat, data: Union[bytes, bytearray]) -> Tuple[in
     channel = -1
     value = 0
     data = bytearray(data)
-    if mode == DataFormat.kDataSign:
-        assert len(data) == 3
-        data.append(0)
 
-    if mode in [DataFormat.kRightPaddedZero, DataFormat.kDataSign]:
-        assert len(data) == 4
-        sign = data[-1]&(1<<7)
-        abs_value = (data[2]&0x7f)<<8 | data[1]<<8 | data[0]
+    def sign_magnitude_to_int(data, sign) -> int:
+        assert len(data) == 3
+        abs_value = (data[0]<<16) | (data[1]<<8) | (data[2])
+        assert abs_value < (1<<23)
+        assert abs_value >= 0
         mult = 1
         if sign:
             mult = -1
         value = abs_value * mult
+        return value
+
+    if mode == DataFormat.kDataSign:
+        assert len(data) == 3
+        data[0] = data[0]&0x7f
+        sign = data[0]&(1<<7)
+        value = sign_magnitude_to_int(data, sign=sign)
+
+    elif mode == DataFormat.kRightPaddedZero:
+        assert len(data) == 4
+        assert(data[-1] == 0)
+        data = data[:-1] # drop last byte
+        sign = data[0]&(1<<7)
+        value = sign_magnitude_to_int(data, sign=sign)
+
     elif mode == DataFormat.kSignExtended:
         assert len(data) == 4
         value = int.from_bytes(data, byteorder="big", signed=True)
+
     elif mode == DataFormat.kChannelPlusSignExtended:
         assert len(data) == 4
-        channel = (data[-1] >> 4) & 0x0f
-        data[-1] |= 0xf0
+        channel = (data[0] >> 4) & 0x0f
+        if data[0]&0x0f == 0x0f:
+            data[0] = 0xff
+        else:
+            data[0] = 0
         value = int.from_bytes(data, byteorder="big", signed=True)
     else:
         assert 0
+
     return channel, value
 
 def format_adc_output(mode: DataFormat, data: int, channel: int = 0) -> bytes:
@@ -205,24 +231,24 @@ def format_adc_output(mode: DataFormat, data: int, channel: int = 0) -> bytes:
     out = None
     if mode == DataFormat.kDataSign:
         dout = abs(data) | (sign<<23)
-        out = dout.to_bytes(length=3, byteorder="little")
+        out = dout.to_bytes(length=3, byteorder="big", signed=True)
     elif mode == DataFormat.kRightPaddedZero:
         dout = (abs(data) | (sign<<23)) << 8
-        out = dout.to_bytes(length=4, byteorder="little")
+        out = dout.to_bytes(length=4, byteorder="big", signed=True)
     elif mode == DataFormat.kSignExtended:
-        out = (data<<8).to_bytes(length=4, byteorder="little")
+        out = data.to_bytes(length=4, byteorder="big", signed=True)
     elif mode == DataFormat.kChannelPlusSignExtended:
-        out = bytearray(dout.to_bytes(length=4, byteorder="little"))
-        out[-1] &= 0x0f
-        out[-1] |= (channel & 0xf)<<4
+        out = bytearray(data.to_bytes(length=4, byteorder="big", signed=True))
+        out[0] &= 0x0f
+        out[0] |= (channel & 0xf)<<4
     return bytes(out)
 
 
 class VRefSelection(enum.IntEnum):
     '''Table 5-9
     page 50.'''
-    kOutput = 0
-    kInput = 1
+    kInternal = 1
+    kExternal = 0
 
 
 class AdcOperatingMode(enum.IntEnum):
@@ -391,10 +417,10 @@ page 89.'''
     kTimer = 8
     kOffsetcal = 9
     kGaincal = 10
-    # kReserved0 = 11
-    # kReserved1 = 12
+    kReserved0 = 11
+    kReserved1 = 12
     kLock = 13
-    # kReserved2 = 14
+    kReserved2 = 14
     kCrccfg = 15
 
 
@@ -420,7 +446,10 @@ internal_registers = {
     InternalRegisterAddress.kTimer: InternalRegister(InternalRegisterAddress.kTimer, 3),
     InternalRegisterAddress.kOffsetcal: InternalRegister(InternalRegisterAddress.kOffsetcal, 3),
     InternalRegisterAddress.kGaincal: InternalRegister(InternalRegisterAddress.kGaincal, 3),
+    InternalRegisterAddress.kReserved0: InternalRegister(InternalRegisterAddress.kReserved0, 3),
+    InternalRegisterAddress.kReserved1: InternalRegister(InternalRegisterAddress.kReserved1, 1),
     InternalRegisterAddress.kLock: InternalRegister(InternalRegisterAddress.kLock, 1),
+    InternalRegisterAddress.kReserved2: InternalRegister(InternalRegisterAddress.kReserved2, 2),
     InternalRegisterAddress.kCrccfg: InternalRegister(InternalRegisterAddress.kCrccfg, 2),
 }
 
@@ -599,13 +628,13 @@ class ConfigurationTable:
         self._settings = dict()
 
         self._settings["partial_shutdown"]=False
-        self._settings["vref_sel"]=VRefSelection.kOutput
-        self._settings["clk_sel"]=ClockSelection.kInternal
+        self._settings["vref_sel"]=VRefSelection.kInternal
+        self._settings["clk_sel"]=ClockSelection.kInternalWithClockOutput
         self._settings["cs_sel"]=BurnoutCurrentSourceSetting.k0
         self._settings["adc_mode"]=AdcOperatingMode.kStandby
 
         self._settings["clk_prescale"]=0x3  # 8
-        self._settings["osr"]=0b0111  # 4096
+        self._settings["osr"]=0b1010
 
         self._settings["boost"]=BoostSetting.k1
         self._settings["gain"]=AdcGainSetting.k1

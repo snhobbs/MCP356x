@@ -133,6 +133,11 @@ class MCP35xx:
         """Returns the MCP36xx's reference voltage. (read-only)"""
         return self._ref_voltage
 
+    @property
+    def data_ready(self) -> bool:
+        status, irq = self.read_register(objects.InternalRegisterAddress.kIrq)
+        return ((irq[0] >> 6)&0x1) == 0
+
     def read_register(self, register: Union[objects.InternalRegister, objects.InternalRegisterAddress]) -> Tuple[int, bytearray]:
         with self._spi_device as spi:
             status, data = read_register(spi, register, address=self._address)
